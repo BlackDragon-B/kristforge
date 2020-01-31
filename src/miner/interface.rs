@@ -1,9 +1,12 @@
 use super::Target;
 use crate::krist::address::Address;
+use crate::miner::calculate_work;
 use crossbeam_channel::{Receiver, TryRecvError};
 use futures::channel::mpsc::UnboundedSender;
 use indicatif::ProgressBar;
+use sha2::{Digest, Sha256};
 use std::cmp::min;
+use std::convert::TryInto;
 use std::time::Duration;
 
 pub struct MinerInterface {
@@ -79,21 +82,43 @@ impl MinerInterface {
     }
 
     pub fn report_solution(&mut self, solution: String) -> Result<(), StopMining> {
+        // calculate the score for the reported solution
+        let input = self.address.to_string() + &self.target.unwrap().block.into_hex();
+        let mut input = input.as_bytes().to_vec();
+        input.extend(solution.chars().map(|c| c as u8));
+
+        let hash = Sha256::digest(&input);
+        let score = calculate_work(hash[..6].try_into().unwrap());
+
+        // TODO: reject invalid solutions here
+
         log::info!(
-            "Solution reported for address {} and target {:?}: nonce {} (hex: {:x?})",
+            "Solution reported:\n\
+            \tAddress: {}\n\
+            \tTarget: {:?}\n\
+            \tRaw solution nonce (len={}): `{}`\n\
+            \tHex solution nonce: {}\n\
+            \tRaw hash input (len={}): `{:?}`\n\
+            \tHex hash input: {}\n\
+            \tHex hash output: {}\n\
+            \tCalculated score: {}",
             self.address,
             self.target,
+            solution.len(),
             solution,
-            solution,
+            hex::encode(&solution),
+            input.len(),
+            input,
+            hex::encode(&input),
+            hex::encode(hash),
+            score,
         );
 
         self.pb.println(format!(
-            "Submitting solution for block {} (nonce {})",
+            "Submitting solution for block {} (hex nonce {})",
             self.target.unwrap().block.into_hex(),
-            solution
+            hex::encode(&solution),
         ));
-
-        // TODO: validate solution
 
         self.solution_tx
             .unbounded_send(solution)
